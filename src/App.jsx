@@ -1,0 +1,222 @@
+import React, { useState, useEffect } from 'react';
+import { AuthProvider } from './context/AuthContext';
+import { TripProvider, useTrip } from './context/TripContext';
+import { ToastProvider } from './components/common/Toast';
+import { Header } from './components/navigation/Header';
+import { Sidebar } from './components/navigation/Sidebar';
+import { BottomNav } from './components/navigation/BottomNav';
+import { HeroBalance } from './components/dashboard/HeroBalance';
+import { WhoOwesWhom } from './components/dashboard/WhoOwesWhom';
+import { RecentList } from './components/dashboard/RecentList';
+import { ExpenseList } from './components/expenses/ExpenseList';
+import { ExpenseModal } from './components/expenses/ExpenseModal';
+import { ExpenseDetailModal } from './components/expenses/ExpenseDetailModal';
+import { SettleUpView } from './components/settlement/SettleUpView';
+import { MembersList } from './components/members/MembersList';
+import { InviteModal } from './components/members/InviteModal';
+import { AnalyticsView } from './components/analytics/AnalyticsView';
+import { ActivityFeed } from './components/activity/ActivityFeed';
+import { TripSelector } from './components/trips/TripSelector';
+import { CreateTripModal } from './components/trips/CreateTripModal';
+import { JoinTripModal } from './components/trips/JoinTripModal';
+import { ProfileModal } from './components/profile/ProfileModal';
+import { useAuth } from './context/AuthContext';
+import { AuthModal } from './components/auth/AuthModal';
+import { Plus } from 'lucide-react';
+
+function TripSplitApp() {
+  const { activeTrip } = useTrip();
+  const { currentUser, isAuthenticated } = useAuth();
+
+  const [currentTab, setCurrentTab] = useState('dashboard');
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState(null);
+  const [detailExpense, setDetailExpense] = useState(null);
+  const [isCreateTripOpen, setIsCreateTripOpen] = useState(false);
+  const [isJoinTripOpen, setIsJoinTripOpen] = useState(false);
+  const [initialJoinCode, setInitialJoinCode] = useState('');
+  const [isInviteOpen, setIsInviteOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+
+  // Check URL query parameters on load for direct invite link (e.g. ?join=GOA6X9 or ?invite=GOA6X9)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const joinCode = params.get('join') || params.get('invite');
+      if (joinCode) {
+        setInitialJoinCode(joinCode.toUpperCase());
+        setIsJoinTripOpen(true);
+      }
+    } catch {}
+  }, []);
+
+  const handleOpenAddExpense = () => {
+    setEditingExpense(null);
+    setIsAddExpenseOpen(true);
+  };
+
+  const handleEditExpense = (expense) => {
+    setEditingExpense(expense);
+    setIsAddExpenseOpen(true);
+  };
+
+  const handleSelectExpense = (expense) => {
+    setDetailExpense(expense);
+  };
+
+  return (
+    <div className="app-container">
+      {/* Desktop Sidebar */}
+      <Sidebar
+        currentTab={currentTab}
+        setCurrentTab={setCurrentTab}
+        onOpenAddExpense={handleOpenAddExpense}
+        onOpenInvite={() => setIsInviteOpen(true)}
+        onViewTrips={() => setCurrentTab('trips')}
+      />
+
+      {/* Main Wrapper */}
+      <div className="main-wrapper">
+        {/* Sticky Header */}
+        <Header
+          onOpenCreateTrip={() => setIsCreateTripOpen(true)}
+          onOpenJoinTrip={() => {
+            setInitialJoinCode('');
+            setIsJoinTripOpen(true);
+          }}
+          onOpenInvite={() => setIsInviteOpen(true)}
+          onOpenProfile={() => setIsProfileOpen(true)}
+          onOpenAuth={() => setIsAuthOpen(true)}
+          onViewTrips={() => setCurrentTab('trips')}
+        />
+
+        {/* Content Area */}
+        <main className="content-area">
+          {currentTab === 'trips' && (
+            <TripSelector
+              onSelectTrip={() => setCurrentTab('dashboard')}
+              onOpenCreateTrip={() => setIsCreateTripOpen(true)}
+              onOpenJoinTrip={() => {
+                setInitialJoinCode('');
+                setIsJoinTripOpen(true);
+              }}
+            />
+          )}
+
+          {currentTab === 'dashboard' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              <HeroBalance
+                onOpenAddExpense={handleOpenAddExpense}
+                onOpenSettle={() => setCurrentTab('settle')}
+                onOpenInvite={() => setIsInviteOpen(true)}
+              />
+
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                gap: 24,
+              }}>
+                <WhoOwesWhom onOpenSettle={() => setCurrentTab('settle')} />
+                <RecentList
+                  onOpenAddExpense={handleOpenAddExpense}
+                  onViewAllExpenses={() => setCurrentTab('expenses')}
+                  onSelectExpense={handleSelectExpense}
+                />
+              </div>
+            </div>
+          )}
+
+          {currentTab === 'expenses' && (
+            <ExpenseList
+              onOpenAddExpense={handleOpenAddExpense}
+              onSelectExpense={handleSelectExpense}
+            />
+          )}
+
+          {currentTab === 'settle' && <SettleUpView />}
+
+          {currentTab === 'members' && (
+            <MembersList 
+              onOpenInvite={() => setIsInviteOpen(true)} 
+              onOpenSettle={() => setCurrentTab('settle')}
+            />
+          )}
+
+          {currentTab === 'analytics' && <AnalyticsView />}
+
+          {currentTab === 'activity' && <ActivityFeed />}
+        </main>
+
+        {/* Mobile Floating Action Button for Add Expense */}
+        {activeTrip && currentTab !== 'trips' && (
+          <button
+            onClick={handleOpenAddExpense}
+            className="fab-add"
+            aria-label="Add new expense"
+          >
+            <Plus size={26} strokeWidth={2.5} />
+          </button>
+        )}
+
+        {/* Mobile Bottom Navigation */}
+        <BottomNav currentTab={currentTab} setCurrentTab={setCurrentTab} />
+      </div>
+
+      {/* Modals */}
+      <ExpenseModal
+        isOpen={isAddExpenseOpen}
+        onClose={() => {
+          setIsAddExpenseOpen(false);
+          setEditingExpense(null);
+        }}
+        editingExpense={editingExpense}
+      />
+
+      <ExpenseDetailModal
+        isOpen={!!detailExpense}
+        onClose={() => setDetailExpense(null)}
+        expense={detailExpense}
+        onEdit={handleEditExpense}
+      />
+
+      <CreateTripModal
+        isOpen={isCreateTripOpen}
+        onClose={() => setIsCreateTripOpen(false)}
+      />
+
+      <JoinTripModal
+        isOpen={isJoinTripOpen}
+        onClose={() => setIsJoinTripOpen(false)}
+        initialCode={initialJoinCode}
+      />
+
+      <InviteModal
+        isOpen={isInviteOpen}
+        onClose={() => setIsInviteOpen(false)}
+      />
+
+      <ProfileModal
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+      />
+
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+      />
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ToastProvider>
+      <AuthProvider>
+        <TripProvider>
+          <TripSplitApp />
+        </TripProvider>
+      </AuthProvider>
+    </ToastProvider>
+  );
+}
