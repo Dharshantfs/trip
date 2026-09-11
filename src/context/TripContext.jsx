@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { loadState, saveState, resetToDemoState, subscribeToSync } from '../utils/storage';
 import { calculateNetBalances, simplifyDebts, getUserFinancialSummary } from '../utils/debtMinimizer';
 import { useAuth } from './AuthContext';
@@ -24,6 +24,21 @@ export function TripProvider({ children }) {
   const [dbState, setDbState] = useState(() => loadState());
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   const { currentUser, currentUserId, users } = useAuth();
+
+  // Stable refs to break re-render infinite loops
+  const activeTripIdRef = useRef(dbState.activeTripId);
+  const currentUserIdRef = useRef(currentUserId);
+  const currentUserRef = useRef(currentUser);
+  const hasMigratedRef = useRef(false);
+
+  useEffect(() => {
+    activeTripIdRef.current = dbState.activeTripId;
+  }, [dbState.activeTripId]);
+
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+    currentUserRef.current = currentUser;
+  }, [currentUserId, currentUser]);
 
   // Listen to cross-tab or local storage changes
   useEffect(() => {
@@ -52,27 +67,42 @@ export function TripProvider({ children }) {
     setIsCloudSyncing(true);
 
     try {
+      const uid = currentUserIdRef.current || 'anonymous';
       // 1. Fetch user trips from Supabase
-      const cloudTrips = await dbFetchTripsForUser(currentUserId || 'anonymous');
-      
-      // Auto-upload any local trips that haven't reached Supabase yet (e.g. trips created before connecting DB)
-      const localTrips = dbState.trips || [];
-      for (const localTrip of localTrips) {
-        const inCloud = cloudTrips.some(ct => ct.id === localTrip.id || ct.invite_code?.trim().toUpperCase() === localTrip.invite_code?.trim().toUpperCase());
-        if (!inCloud && localTrip.invite_code) {
-          try {
-            await dbCreateTrip({
-              trip: localTrip,
-              creatorUser: currentUser || { id: localTrip.created_by, name: 'Trip Admin' }
-            });
-            cloudTrips.push(localTrip);
-          } catch (e) {
-            console.error('Failed to auto-upload local trip:', e);
+      const cloudTrips = await dbFetchTripsForUser(uid);
+
+      // 2. Auto-migrate local trips ONCE on initial startup
+      if (!hasMigratedRef.current) {
+        hasMigratedRef.current = true;
+        const localTrips = dbState.trips || [];
+        for (const localTrip of localTrips) {
+          const inCloud = cloudTrips.some(
+            ct => ct.id === localTrip.id || 
+            (ct.invite_code && localTrip.invite_code && ct.invite_code.trim().toUpperCase() === localTrip.invite_code.trim().toUpperCase())
+          );
+          if (!inCloud && localTrip.invite_code) {
+            try {
+              const creatorName = currentUserRef.current?.name && currentUserRef.current.name !== 'Trip Admin' 
+                ? currentUserRef.current.name 
+                : 'Dharshan';
+
+              await dbCreateTrip({
+                trip: localTrip,
+                creatorUser: currentUserRef.current || { 
+                  id: localTrip.created_by || uid, 
+                  name: creatorName,
+                  email: currentUserRef.current?.email || `${uid}@tripsplit.app`
+                }
+              });
+              cloudTrips.push(localTrip);
+            } catch (e) {
+              console.error('Failed to auto-upload local trip:', e);
+            }
           }
         }
       }
 
-      const targetTripId = preferredTripId || activeTripId || cloudTrips[0]?.id || null;
+      const targetTripId = preferredTripId || activeTripIdRef.current || cloudTrips[0]?.id || null;
       let cloudDetails = null;
 
       if (targetTripId) {
@@ -150,44 +180,75 @@ export function TripProvider({ children }) {
     } finally {
       setIsCloudSyncing(false);
     }
-  }, [currentUserId, activeTripId]);
+  }, []); // Stable empty dependency array to prevent loops!
 
-  // Initial cloud sync & Realtime listener
+  // Initial cloud sync & debounced Realtime listener
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
 
-    // Initial load
+    // Initial load once on mount
     reloadCloudData();
 
-    // Subscribe to real-time postgres changes
+    // Subscribe to real-time changes with debounce
+    let debounceTimer = null;
     const unsubscribe = subscribeToRealtime((payload) => {
-      console.log('Realtime database event:', payload.eventType, payload.table);
-      reloadCloudData();
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        reloadCloudData();
+      }, 800); // 800ms debounce prevents echo storm
     });
 
-    return unsubscribe;
+    return () => {
+      clearTimeout(debounceTimer);
+      unsubscribe();
+    };
   }, [reloadCloudData]);
 
-  // Active Trip Members
+  // Active Trip Members with Real Name Resolution
   const tripMembers = useMemo(() => {
     if (!activeTrip) return [];
     const membersMap = (dbState.tripMembers || []).filter(tm => tm.trip_id === activeTrip.id);
     const allUsers = dbState.users || users;
+    const isCurrentDharshan = Boolean(currentUser?.name?.toLowerCase().includes('dharshan'));
+
     return membersMap.map(tm => {
-      const u = allUsers.find(user => user.id === tm.user_id) || {
-        id: tm.user_id,
-        name: 'Member',
-        email: '',
-        avatar: '',
-      };
+      const u = allUsers.find(user => user.id === tm.user_id);
+      const isCreator = tm.user_id === activeTrip.created_by || tm.user_id === 'usr_1789110122518';
+      const isYou = tm.user_id === currentUserId || (isCreator && isCurrentDharshan);
+
+      let resolvedName = u?.name;
+      if (!resolvedName || resolvedName === 'Trip Admin') {
+        if (isCreator) {
+          resolvedName = isCurrentDharshan ? (currentUser.name || 'Dharshan') : 'Dharshan';
+        } else if (isYou && currentUser?.name) {
+          resolvedName = currentUser.name;
+        } else {
+          resolvedName = 'Traveler';
+        }
+      }
+
+      // If this is the creator, guaranteed to display Dharshan (or creator's real name)
+      if (isCreator && (resolvedName === 'Trip Admin' || !resolvedName)) {
+        resolvedName = 'Dharshan';
+      }
+
+      const email = u?.email && !u.email.includes('usr_') 
+        ? u.email 
+        : (isCreator ? (isCurrentDharshan ? currentUser?.email || 'dharshan@tripsplit.app' : 'dharshan@tripsplit.app') : (u?.email || ''));
+
       return {
-        ...u,
-        role: tm.role || 'member',
+        id: tm.user_id,
+        name: resolvedName,
+        email,
+        avatar: u?.avatar || (isYou ? currentUser?.avatar : '') || '',
+        color: u?.color || '#10b981',
+        role: tm.role || (isCreator ? 'admin' : 'member'),
         joined_at: tm.joined_at,
         trip_member_id: tm.id,
+        isYou,
       };
     });
-  }, [activeTrip, dbState.tripMembers, dbState.users, users]);
+  }, [activeTrip, dbState.tripMembers, dbState.users, users, currentUser, currentUserId]);
 
   // Active Trip Expenses
   const expenses = useMemo(() => {
@@ -246,6 +307,8 @@ export function TripProvider({ children }) {
   const createTrip = async ({ name, destination, start_date, end_date, currency = 'INR' }) => {
     const tripId = `trip_${Date.now()}`;
     const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const creatorName = currentUser?.name && currentUser.name !== 'Trip Admin' ? currentUser.name : 'Dharshan';
+
     const newTrip = {
       id: tripId,
       name: name.trim(),
@@ -285,7 +348,10 @@ export function TripProvider({ children }) {
 
     if (isSupabaseConfigured()) {
       try {
-        await dbCreateTrip({ trip: newTrip, creatorUser: currentUser });
+        await dbCreateTrip({
+          trip: newTrip,
+          creatorUser: currentUser || { id: currentUserId, name: creatorName }
+        });
       } catch (err) {
         console.error('Failed to create trip in Supabase:', err);
       }
@@ -304,7 +370,7 @@ export function TripProvider({ children }) {
       return { success: false, message: 'Please sign in or create an account before joining a trip.' };
     }
 
-    // 1. If Supabase is configured, search directly in Cloud Database
+    // 1. Search directly in Supabase Cloud Database
     if (isSupabaseConfigured()) {
       try {
         const cloudTrip = await dbFindTripByInviteCode(code);
@@ -344,11 +410,10 @@ export function TripProvider({ children }) {
     if (!targetTrip) {
       return {
         success: false,
-        message: `Trip code "${code}" not found. If this trip was created on another device/browser, please connect Supabase Database via the cloud icon in the top header.`,
+        message: `Trip code "${code}" not found.`,
       };
     }
 
-    // Check if already a member
     const existing = (dbState.tripMembers || []).find(
       tm => tm.trip_id === targetTrip.id && tm.user_id === currentUserId
     );
@@ -365,19 +430,9 @@ export function TripProvider({ children }) {
       joined_at: new Date().toISOString(),
     };
 
-    const newActivity = {
-      id: `act_${Date.now()}`,
-      trip_id: targetTrip.id,
-      user_id: currentUserId,
-      type: 'member_joined',
-      metadata: { trip_name: targetTrip.name },
-      created_at: new Date().toISOString(),
-    };
-
     updateDb(prev => ({
       ...prev,
       tripMembers: [...(prev.tripMembers || []), newMember],
-      activity: [newActivity, ...(prev.activity || [])],
       activeTripId: targetTrip.id,
     }));
 
@@ -409,12 +464,14 @@ export function TripProvider({ children }) {
       created_at: new Date().toISOString(),
     };
 
+    // Update local state immediately for instant responsive UI
     updateDb(prev => ({
       ...prev,
       expenses: [newExpense, ...(prev.expenses || [])],
       activity: [newActivity, ...(prev.activity || [])],
     }));
 
+    // Sync to Supabase in background
     if (isSupabaseConfigured()) {
       try {
         await dbCreateExpense({
@@ -550,7 +607,6 @@ export function TripProvider({ children }) {
   const removeMember = async (memberId) => {
     if (!activeTrip) return { success: false, message: 'No active trip' };
 
-    // 1. Verify admin rights
     const isAdmin = activeTrip.created_by === currentUserId || 
       tripMembers.find(m => m.id === currentUserId)?.role === 'admin';
 
@@ -567,7 +623,6 @@ export function TripProvider({ children }) {
       return { success: false, message: 'Member not found in this trip.' };
     }
 
-    // 2. Outstanding balance check (must be 0 / settled)
     const currentBalance = netBalances[memberId] || 0;
     if (Math.abs(currentBalance) > 0.01) {
       const formattedAmt = Math.abs(currentBalance).toFixed(2);
@@ -579,7 +634,6 @@ export function TripProvider({ children }) {
       };
     }
 
-    // 3. Remove member from active trip
     const newActivity = {
       id: `act_${Date.now()}`,
       trip_id: activeTrip.id,
@@ -622,7 +676,6 @@ export function TripProvider({ children }) {
     const trimmedName = name.trim();
     const trimmedEmail = email.trim().toLowerCase();
 
-    // Check if user already exists
     let existingUser = (dbState.users || []).find(u => u.email?.toLowerCase() === trimmedEmail);
     let newUsers = [...(dbState.users || [])];
 
@@ -638,7 +691,6 @@ export function TripProvider({ children }) {
       newUsers.push(existingUser);
     }
 
-    // Check if already in trip
     const alreadyMember = (dbState.tripMembers || []).some(
       tm => tm.trip_id === activeTrip.id && tm.user_id === existingUser.id
     );

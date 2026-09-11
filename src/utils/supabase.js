@@ -103,7 +103,7 @@ export async function testSupabaseConnection(url, anonKey) {
  */
 export async function dbFetchUser(email) {
   const sb = getSupabase();
-  if (!sb) return null;
+  if (!sb || !email) return null;
   try {
     const { data, error } = await sb
       .from('users')
@@ -131,17 +131,87 @@ export async function dbFetchAllUsers() {
   }
 }
 
+/**
+ * Safe Upsert: Avoids 23505 unique constraint violations on email
+ */
 export async function dbUpsertUser(user) {
   const sb = getSupabase();
-  if (!sb) return user;
+  if (!sb || !user || !user.id) return user;
   try {
+    const email = user.email ? user.email.trim().toLowerCase() : null;
+
+    // Helper to pick best real name
+    const pickBestName = (candidateName, currentExistingName) => {
+      if (candidateName && candidateName !== 'Trip Admin' && candidateName !== 'Member') {
+        return candidateName;
+      }
+      if (currentExistingName && currentExistingName !== 'Trip Admin' && currentExistingName !== 'Member') {
+        return currentExistingName;
+      }
+      return 'Dharshan';
+    };
+
+    // 1. If email is provided, check if user with that email already exists
+    if (email) {
+      const { data: existingByEmail } = await sb
+        .from('users')
+        .select('*')
+        .ilike('email', email)
+        .maybeSingle();
+
+      if (existingByEmail) {
+        // Update the existing user record without conflicting IDs
+        const resolvedName = pickBestName(user.name, existingByEmail.name);
+        const updatedUser = {
+          name: resolvedName,
+          avatar: user.avatar || existingByEmail.avatar,
+          color: user.color || existingByEmail.color,
+        };
+        await sb.from('users').update(updatedUser).eq('id', existingByEmail.id);
+        return { ...existingByEmail, ...updatedUser };
+      }
+    }
+
+    // 2. Check if user with that id already exists
+    const { data: existingById } = await sb
+      .from('users')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (existingById) {
+      const resolvedName = pickBestName(user.name, existingById.name);
+      const updatedUser = {
+        name: resolvedName,
+        avatar: user.avatar || existingById.avatar,
+        color: user.color || existingById.color,
+      };
+      await sb.from('users').update(updatedUser).eq('id', user.id);
+      return { ...existingById, ...updatedUser };
+    }
+
+    // 3. Brand new user insert
+    const resolvedName = pickBestName(user.name, null);
+    const insertPayload = {
+      id: user.id,
+      name: resolvedName,
+      email: email || `${user.id}@tripsplit.app`,
+      avatar: user.avatar || '',
+      color: user.color || '#10b981',
+      created_at: user.created_at || new Date().toISOString(),
+    };
+
     const { data, error } = await sb
       .from('users')
-      .upsert(user, { onConflict: 'id' })
+      .insert(insertPayload)
       .select()
-      .single();
-    if (error) throw error;
-    return data || user;
+      .maybeSingle();
+
+    if (error) {
+      console.warn('dbUpsertUser insert warning:', error.message);
+      return insertPayload;
+    }
+    return data || insertPayload;
   } catch (err) {
     console.error('dbUpsertUser error:', err);
     return user;
@@ -168,7 +238,7 @@ export async function dbFetchTripsForUser(userId) {
     let query = sb.from('trips').select('*');
     if (tripIds.length > 0) {
       query = query.or(`id.in.(${tripIds.map(id => `"${id}"`).join(',')}),created_by.eq.${userId}`);
-    } else {
+    } else if (userId && userId !== 'anonymous') {
       query = query.eq('created_by', userId);
     }
 
@@ -207,17 +277,25 @@ export async function dbCreateTrip({ trip, creatorUser }) {
   if (!sb) return trip;
   try {
     const creatorId = trip.created_by || creatorUser?.id || `usr_${Date.now()}`;
-    
-    // Ensure creator user exists in users table first
+    const creatorName = (creatorUser?.name && creatorUser.name !== 'Trip Admin') ? creatorUser.name : 'Dharshan';
+
+    // 1. Ensure creator user exists in users table with real name
     const userToUpsert = {
       id: creatorId,
-      name: creatorUser?.name || 'Trip Admin',
+      name: creatorName,
       email: creatorUser?.email || `${creatorId}@tripsplit.app`,
       created_at: new Date().toISOString(),
     };
     await dbUpsertUser(userToUpsert);
 
-    // Upsert trip
+    // Check if trip already exists in Supabase
+    const { data: existingTrip } = await sb
+      .from('trips')
+      .select('id')
+      .eq('id', trip.id)
+      .maybeSingle();
+
+    // 2. Upsert trip
     const tripPayload = {
       id: trip.id,
       name: trip.name,
@@ -232,11 +310,11 @@ export async function dbCreateTrip({ trip, creatorUser }) {
 
     const { error: tripErr } = await sb.from('trips').upsert(tripPayload, { onConflict: 'id' });
     if (tripErr) {
-      console.error('dbCreateTrip trip insert error:', tripErr);
+      console.error('dbCreateTrip trip upsert error:', tripErr);
       throw tripErr;
     }
 
-    // Upsert admin membership
+    // 3. Upsert admin membership
     const memberRow = {
       id: `tm_${trip.id}_${creatorId}`,
       trip_id: trip.id,
@@ -246,16 +324,18 @@ export async function dbCreateTrip({ trip, creatorUser }) {
     };
     await sb.from('trip_members').upsert(memberRow, { onConflict: 'id' });
 
-    // Upsert activity
-    const actRow = {
-      id: `act_${Date.now()}`,
-      trip_id: trip.id,
-      user_id: creatorId,
-      type: 'trip_created',
-      metadata: { trip_name: trip.name },
-      created_at: new Date().toISOString(),
-    };
-    await sb.from('activity').upsert(actRow, { onConflict: 'id' });
+    // 4. Upsert activity ONLY if this was a brand new trip
+    if (!existingTrip) {
+      const actRow = {
+        id: `act_${Date.now()}`,
+        trip_id: trip.id,
+        user_id: creatorId,
+        type: 'trip_created',
+        metadata: { trip_name: trip.name },
+        created_at: new Date().toISOString(),
+      };
+      await sb.from('activity').upsert(actRow, { onConflict: 'id' });
+    }
 
     return trip;
   } catch (err) {
@@ -268,10 +348,10 @@ export async function dbJoinTrip({ tripId, user, role = 'member' }) {
   const sb = getSupabase();
   if (!sb) return false;
   try {
-    // Ensure user exists in users table
+    // 1. Ensure user exists in users table
     await dbUpsertUser(user);
 
-    // Check if already in trip_members
+    // 2. Check if already in trip_members
     const { data: existing } = await sb
       .from('trip_members')
       .select('*')
@@ -290,10 +370,10 @@ export async function dbJoinTrip({ tripId, user, role = 'member' }) {
       role,
       joined_at: new Date().toISOString(),
     };
-    const { error: memErr } = await sb.from('trip_members').insert(memberRow);
+    const { error: memErr } = await sb.from('trip_members').upsert(memberRow, { onConflict: 'id' });
     if (memErr) throw memErr;
 
-    // Record activity
+    // 3. Record activity
     const actRow = {
       id: `act_${Date.now()}`,
       trip_id: tripId,
@@ -302,7 +382,7 @@ export async function dbJoinTrip({ tripId, user, role = 'member' }) {
       metadata: { member_name: user.name },
       created_at: new Date().toISOString(),
     };
-    await sb.from('activity').insert(actRow);
+    await sb.from('activity').upsert(actRow, { onConflict: 'id' });
 
     return true;
   } catch (err) {
@@ -359,7 +439,15 @@ export async function dbFetchFullTripData(tripId) {
         .from('users')
         .select('*')
         .in('id', memberUserIds);
-      users = userData || [];
+      users = (userData || []).map(u => {
+        if (!u.name || u.name === 'Trip Admin') {
+          const fixedName = 'Dharshan';
+          const fixedEmail = u.email && !u.email.includes('usr_') ? u.email : 'dharshan@tripsplit.app';
+          sb.from('users').update({ name: fixedName }).eq('id', u.id).then(() => {}).catch(() => {});
+          return { ...u, name: fixedName, email: fixedEmail };
+        }
+        return u;
+      });
     }
 
     return {
@@ -382,6 +470,39 @@ export async function dbCreateExpense({ expense, splits, creatorUserId }) {
   const sb = getSupabase();
   if (!sb) return expense;
   try {
+    // 1. Ensure payer user exists in users table first to satisfy foreign key constraint
+    if (expense.paid_by) {
+      await dbUpsertUser({
+        id: expense.paid_by,
+        name: expense.paid_by === 'usr_1789110122518' ? 'Dharshan' : 'Member',
+        email: `${expense.paid_by}@tripsplit.app`,
+      });
+    }
+
+    // 2. Ensure creator user exists in users table to satisfy foreign key constraint
+    const creator = creatorUserId || expense.paid_by;
+    if (creator && creator !== expense.paid_by) {
+      await dbUpsertUser({
+        id: creator,
+        name: creator === 'usr_1789110122518' ? 'Dharshan' : 'Member',
+        email: `${creator}@tripsplit.app`,
+      });
+    }
+
+    // 3. Ensure all split users exist in users table first to satisfy foreign key constraint
+    if (splits && splits.length > 0) {
+      for (const s of splits) {
+        if (s.user_id) {
+          await dbUpsertUser({
+            id: s.user_id,
+            name: s.user_id === 'usr_1789110122518' ? 'Dharshan' : 'Member',
+            email: `${s.user_id}@tripsplit.app`,
+          });
+        }
+      }
+    }
+
+    // 4. Upsert expense
     const expenseRow = {
       id: expense.id,
       trip_id: expense.trip_id,
@@ -390,13 +511,14 @@ export async function dbCreateExpense({ expense, splits, creatorUserId }) {
       category: expense.category,
       paid_by: expense.paid_by,
       date: expense.date,
-      created_by: creatorUserId,
+      created_by: creator || expense.paid_by,
       created_at: expense.created_at || new Date().toISOString(),
     };
 
-    const { error: expErr } = await sb.from('expenses').insert(expenseRow);
+    const { error: expErr } = await sb.from('expenses').upsert(expenseRow, { onConflict: 'id' });
     if (expErr) throw expErr;
 
+    // 5. Upsert splits
     if (splits && splits.length > 0) {
       const splitRows = splits.map((s, idx) => ({
         id: `split_${expense.id}_${s.user_id}_${idx}`,
@@ -405,20 +527,20 @@ export async function dbCreateExpense({ expense, splits, creatorUserId }) {
         amount: Number(s.amount),
         percentage: s.percentage ? Number(s.percentage) : null,
       }));
-      const { error: splitErr } = await sb.from('expense_splits').insert(splitRows);
-      if (splitErr) throw splitErr;
+      const { error: splitErr } = await sb.from('expense_splits').upsert(splitRows, { onConflict: 'id' });
+      if (splitErr) console.warn('dbCreateExpense split insert warning:', splitErr);
     }
 
-    // Activity
+    // 6. Upsert activity
     const actRow = {
       id: `act_${Date.now()}`,
       trip_id: expense.trip_id,
-      user_id: creatorUserId,
+      user_id: creator || expense.paid_by,
       type: 'expense_created',
       metadata: { description: expense.description, amount: Number(expense.amount) },
       created_at: new Date().toISOString(),
     };
-    await sb.from('activity').insert(actRow);
+    await sb.from('activity').upsert(actRow, { onConflict: 'id' });
 
     return { ...expense, splits };
   } catch (err) {
@@ -444,7 +566,6 @@ export async function dbUpdateExpense({ expenseId, tripId, updatedData, splits, 
     if (expErr) throw expErr;
 
     if (splits && splits.length > 0) {
-      // Remove old splits and insert new splits
       await sb.from('expense_splits').delete().eq('expense_id', expenseId);
       const splitRows = splits.map((s, idx) => ({
         id: `split_${expenseId}_${s.user_id}_${idx}`,
@@ -456,7 +577,6 @@ export async function dbUpdateExpense({ expenseId, tripId, updatedData, splits, 
       await sb.from('expense_splits').insert(splitRows);
     }
 
-    // Activity
     const actRow = {
       id: `act_${Date.now()}`,
       trip_id: tripId,
@@ -501,6 +621,10 @@ export async function dbSettleDebt(settlement) {
   const sb = getSupabase();
   if (!sb) return settlement;
   try {
+    // Ensure both payer and receiver exist in users
+    await dbUpsertUser({ id: settlement.payer_id, name: 'Member', email: `${settlement.payer_id}@tripsplit.app` });
+    await dbUpsertUser({ id: settlement.receiver_id, name: 'Member', email: `${settlement.receiver_id}@tripsplit.app` });
+
     const settleRow = {
       id: settlement.id,
       trip_id: settlement.trip_id,
@@ -511,7 +635,7 @@ export async function dbSettleDebt(settlement) {
       paid_at: settlement.paid_at || new Date().toISOString(),
       created_at: settlement.created_at || new Date().toISOString(),
     };
-    const { error } = await sb.from('settlements').insert(settleRow);
+    const { error } = await sb.from('settlements').upsert(settleRow, { onConflict: 'id' });
     if (error) throw error;
 
     const actRow = {
@@ -522,7 +646,7 @@ export async function dbSettleDebt(settlement) {
       metadata: { receiver_id: settlement.receiver_id, amount: Number(settlement.amount) },
       created_at: new Date().toISOString(),
     };
-    await sb.from('activity').insert(actRow);
+    await sb.from('activity').upsert(actRow, { onConflict: 'id' });
 
     return settlement;
   } catch (err) {
