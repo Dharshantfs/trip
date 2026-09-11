@@ -56,10 +56,10 @@ export function MembersList({ onOpenInvite, onOpenSettle }) {
     }
   };
 
-  const handleConfirmRemove = () => {
+  const handleConfirmRemove = async () => {
     if (!memberToRemove) return;
 
-    const res = removeMember(memberToRemove.id);
+    const res = await removeMember(memberToRemove.id);
     if (res.success) {
       addToast({ type: 'success', message: res.message });
     } else {

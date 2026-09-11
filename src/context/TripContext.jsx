@@ -1,12 +1,28 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { loadState, saveState, resetToDemoState, subscribeToSync } from '../utils/storage';
 import { calculateNetBalances, simplifyDebts, getUserFinancialSummary } from '../utils/debtMinimizer';
 import { useAuth } from './AuthContext';
+import {
+  isSupabaseConfigured,
+  dbFetchTripsForUser,
+  dbFindTripByInviteCode,
+  dbCreateTrip,
+  dbJoinTrip,
+  dbFetchFullTripData,
+  dbCreateExpense,
+  dbUpdateExpense,
+  dbDeleteExpense,
+  dbSettleDebt,
+  dbRemoveMember,
+  subscribeToRealtime,
+  dbUpsertUser,
+} from '../utils/supabase';
 
 const TripContext = createContext(null);
 
 export function TripProvider({ children }) {
   const [dbState, setDbState] = useState(() => loadState());
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   const { currentUser, currentUserId, users } = useAuth();
 
   // Listen to cross-tab or local storage changes
@@ -17,25 +33,131 @@ export function TripProvider({ children }) {
     return unsubscribe;
   }, []);
 
-  const updateDb = (updater) => {
+  const updateDb = useCallback((updater) => {
     setDbState(prev => {
       const nextState = typeof updater === 'function' ? updater(prev) : updater;
       saveState(nextState, true);
       return nextState;
     });
-  };
+  }, []);
 
   // Active Trip
   const trips = dbState.trips || [];
   const activeTripId = dbState.activeTripId || (trips[0]?.id ?? null);
   const activeTrip = trips.find(t => t.id === activeTripId) || trips[0] || null;
 
+  // Cloud Data Loader
+  const reloadCloudData = useCallback(async (preferredTripId = null) => {
+    if (!isSupabaseConfigured()) return;
+    setIsCloudSyncing(true);
+
+    try {
+      // 1. Fetch user trips from Supabase
+      const cloudTrips = await dbFetchTripsForUser(currentUserId || 'anonymous');
+      
+      const targetTripId = preferredTripId || activeTripId || cloudTrips[0]?.id || null;
+      let cloudDetails = null;
+
+      if (targetTripId) {
+        cloudDetails = await dbFetchFullTripData(targetTripId);
+      }
+
+      setDbState(prev => {
+        // Merge cloud trips with existing
+        const tripMap = new Map();
+        for (const t of cloudTrips) tripMap.set(t.id, t);
+        for (const t of (prev.trips || [])) {
+          if (!tripMap.has(t.id)) tripMap.set(t.id, t);
+        }
+        const mergedTrips = Array.from(tripMap.values());
+
+        // Merge users
+        const userMap = new Map();
+        for (const u of (prev.users || [])) userMap.set(u.id, u);
+        if (cloudDetails?.users) {
+          for (const u of cloudDetails.users) userMap.set(u.id, u);
+        }
+
+        // Merge members for target trip
+        let nextMembers = prev.tripMembers || [];
+        if (cloudDetails?.tripMembers) {
+          nextMembers = [
+            ...nextMembers.filter(m => m.trip_id !== targetTripId),
+            ...cloudDetails.tripMembers,
+          ];
+        }
+
+        // Merge expenses for target trip
+        let nextExpenses = prev.expenses || [];
+        if (cloudDetails?.expenses) {
+          nextExpenses = [
+            ...nextExpenses.filter(e => e.trip_id !== targetTripId),
+            ...cloudDetails.expenses,
+          ];
+        }
+
+        // Merge settlements for target trip
+        let nextSettlements = prev.settlements || [];
+        if (cloudDetails?.settlements) {
+          nextSettlements = [
+            ...nextSettlements.filter(s => s.trip_id !== targetTripId),
+            ...cloudDetails.settlements,
+          ];
+        }
+
+        // Merge activity for target trip
+        let nextActivity = prev.activity || [];
+        if (cloudDetails?.activity) {
+          nextActivity = [
+            ...nextActivity.filter(a => a.trip_id !== targetTripId),
+            ...cloudDetails.activity,
+          ];
+        }
+
+        const updatedState = {
+          ...prev,
+          trips: mergedTrips,
+          users: Array.from(userMap.values()),
+          tripMembers: nextMembers,
+          expenses: nextExpenses,
+          settlements: nextSettlements,
+          activity: nextActivity,
+          activeTripId: targetTripId || prev.activeTripId,
+        };
+
+        saveState(updatedState, false);
+        return updatedState;
+      });
+    } catch (err) {
+      console.error('Error reloading cloud data:', err);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  }, [currentUserId, activeTripId]);
+
+  // Initial cloud sync & Realtime listener
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+
+    // Initial load
+    reloadCloudData();
+
+    // Subscribe to real-time postgres changes
+    const unsubscribe = subscribeToRealtime((payload) => {
+      console.log('Realtime database event:', payload.eventType, payload.table);
+      reloadCloudData();
+    });
+
+    return unsubscribe;
+  }, [reloadCloudData]);
+
   // Active Trip Members
   const tripMembers = useMemo(() => {
     if (!activeTrip) return [];
     const membersMap = (dbState.tripMembers || []).filter(tm => tm.trip_id === activeTrip.id);
+    const allUsers = dbState.users || users;
     return membersMap.map(tm => {
-      const u = users.find(user => user.id === tm.user_id) || {
+      const u = allUsers.find(user => user.id === tm.user_id) || {
         id: tm.user_id,
         name: 'Member',
         email: '',
@@ -48,7 +170,7 @@ export function TripProvider({ children }) {
         trip_member_id: tm.id,
       };
     });
-  }, [activeTrip, dbState.tripMembers, users]);
+  }, [activeTrip, dbState.tripMembers, dbState.users, users]);
 
   // Active Trip Expenses
   const expenses = useMemo(() => {
@@ -99,9 +221,12 @@ export function TripProvider({ children }) {
       ...prev,
       activeTripId: tripId,
     }));
+    if (isSupabaseConfigured()) {
+      reloadCloudData(tripId);
+    }
   };
 
-  const createTrip = ({ name, destination, start_date, end_date, currency = 'INR' }) => {
+  const createTrip = async ({ name, destination, start_date, end_date, currency = 'INR' }) => {
     const tripId = `trip_${Date.now()}`;
     const code = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newTrip = {
@@ -141,14 +266,69 @@ export function TripProvider({ children }) {
       activeTripId: tripId,
     }));
 
+    if (isSupabaseConfigured()) {
+      try {
+        await dbCreateTrip({ trip: newTrip, creatorUser: currentUser });
+      } catch (err) {
+        console.error('Failed to create trip in Supabase:', err);
+      }
+    }
+
     return newTrip;
   };
 
-  const joinTrip = (inviteCode) => {
+  const joinTrip = async (inviteCode) => {
     const code = inviteCode.trim().toUpperCase();
-    const targetTrip = trips.find(t => t.invite_code === code);
+    if (!code) {
+      return { success: false, message: 'Please enter a valid trip invite code.' };
+    }
+
+    if (!currentUser) {
+      return { success: false, message: 'Please sign in or create an account before joining a trip.' };
+    }
+
+    // 1. If Supabase is configured, search directly in Cloud Database
+    if (isSupabaseConfigured()) {
+      try {
+        const cloudTrip = await dbFindTripByInviteCode(code);
+        if (!cloudTrip) {
+          return {
+            success: false,
+            message: `No trip found with invite code "${code}". Please check the code with your friend.`,
+          };
+        }
+
+        // Join trip in Supabase
+        await dbJoinTrip({
+          tripId: cloudTrip.id,
+          user: currentUser,
+          role: 'member',
+        });
+
+        // Reload data from cloud and switch to new trip
+        await reloadCloudData(cloudTrip.id);
+
+        return {
+          success: true,
+          message: `Successfully joined "${cloudTrip.name}"!`,
+          trip: cloudTrip,
+        };
+      } catch (err) {
+        console.error('Error joining trip in Supabase:', err);
+        return {
+          success: false,
+          message: `Failed to join trip: ${err.message || 'Database error'}`,
+        };
+      }
+    }
+
+    // 2. Fallback to local storage
+    const targetTrip = (dbState.trips || []).find(t => t.invite_code === code);
     if (!targetTrip) {
-      return { success: false, message: 'Invalid invite code. Please check and try again.' };
+      return {
+        success: false,
+        message: `Trip code "${code}" not found. If this trip was created on another device/browser, please connect Supabase Database via the cloud icon in the top header.`,
+      };
     }
 
     // Check if already a member
@@ -187,7 +367,7 @@ export function TripProvider({ children }) {
     return { success: true, message: `Joined ${targetTrip.name}!`, trip: targetTrip };
   };
 
-  const addExpense = (expenseData) => {
+  const addExpense = async (expenseData) => {
     if (!activeTrip) return;
     const expenseId = `exp_${Date.now()}`;
     const newExpense = {
@@ -218,10 +398,22 @@ export function TripProvider({ children }) {
       activity: [newActivity, ...(prev.activity || [])],
     }));
 
+    if (isSupabaseConfigured()) {
+      try {
+        await dbCreateExpense({
+          expense: newExpense,
+          splits: expenseData.splits,
+          creatorUserId: currentUserId,
+        });
+      } catch (err) {
+        console.error('Failed to sync expense to Supabase:', err);
+      }
+    }
+
     return newExpense;
   };
 
-  const updateExpense = (expenseId, updatedData) => {
+  const updateExpense = async (expenseId, updatedData) => {
     if (!activeTrip) return;
     const target = expenses.find(e => e.id === expenseId);
     if (!target) return;
@@ -247,9 +439,23 @@ export function TripProvider({ children }) {
       expenses: (prev.expenses || []).map(e => (e.id === expenseId ? modifiedExpense : e)),
       activity: [newActivity, ...(prev.activity || [])],
     }));
+
+    if (isSupabaseConfigured()) {
+      try {
+        await dbUpdateExpense({
+          expenseId,
+          tripId: activeTrip.id,
+          updatedData: modifiedExpense,
+          splits: updatedData.splits || modifiedExpense.splits,
+          userId: currentUserId,
+        });
+      } catch (err) {
+        console.error('Failed to sync expense update to Supabase:', err);
+      }
+    }
   };
 
-  const deleteExpense = (expenseId) => {
+  const deleteExpense = async (expenseId) => {
     if (!activeTrip) return;
     const target = expenses.find(e => e.id === expenseId);
     if (!target) return;
@@ -268,9 +474,23 @@ export function TripProvider({ children }) {
       expenses: (prev.expenses || []).filter(e => e.id !== expenseId),
       activity: [newActivity, ...(prev.activity || [])],
     }));
+
+    if (isSupabaseConfigured()) {
+      try {
+        await dbDeleteExpense({
+          expenseId,
+          tripId: activeTrip.id,
+          description: target.description,
+          amount: target.amount,
+          userId: currentUserId,
+        });
+      } catch (err) {
+        console.error('Failed to sync expense deletion to Supabase:', err);
+      }
+    }
   };
 
-  const settleDebt = ({ payer_id, receiver_id, amount }) => {
+  const settleDebt = async ({ payer_id, receiver_id, amount }) => {
     if (!activeTrip) return;
     const settlementId = `settle_${Date.now()}`;
     const newSettlement = {
@@ -299,10 +519,18 @@ export function TripProvider({ children }) {
       activity: [newActivity, ...(prev.activity || [])],
     }));
 
+    if (isSupabaseConfigured()) {
+      try {
+        await dbSettleDebt(newSettlement);
+      } catch (err) {
+        console.error('Failed to sync settlement to Supabase:', err);
+      }
+    }
+
     return newSettlement;
   };
 
-  const removeMember = (memberId) => {
+  const removeMember = async (memberId) => {
     if (!activeTrip) return { success: false, message: 'No active trip' };
 
     // 1. Verify admin rights
@@ -352,13 +580,26 @@ export function TripProvider({ children }) {
       activity: [newActivity, ...(prev.activity || [])],
     }));
 
+    if (isSupabaseConfigured()) {
+      try {
+        await dbRemoveMember({
+          tripId: activeTrip.id,
+          memberId,
+          memberName: targetMember.name,
+          adminUserId: currentUserId,
+        });
+      } catch (err) {
+        console.error('Failed to sync member removal to Supabase:', err);
+      }
+    }
+
     return {
       success: true,
       message: `${targetMember.name} was removed from ${activeTrip.name}. Balances remain fully tallied.`,
     };
   };
 
-  const inviteMemberDirect = ({ name, email, sendEmail = true }) => {
+  const inviteMemberDirect = async ({ name, email, sendEmail = true }) => {
     if (!activeTrip) return { success: false, message: 'No active trip' };
 
     const trimmedName = name.trim();
@@ -426,10 +667,23 @@ export function TripProvider({ children }) {
       activity: [...newActivities, ...(prev.activity || [])],
     }));
 
+    if (isSupabaseConfigured()) {
+      try {
+        await dbUpsertUser(existingUser);
+        await dbJoinTrip({
+          tripId: activeTrip.id,
+          user: existingUser,
+          role: 'member',
+        });
+      } catch (err) {
+        console.error('Failed to sync invited member to Supabase:', err);
+      }
+    }
+
     return {
       success: true,
       message: sendEmail 
-        ? `Invitation email sent to ${existingUser.email} & added to trip!` 
+        ? `Invitation email recorded for ${existingUser.email} & added to trip!` 
         : `${existingUser.name} added to the trip!`,
       user: existingUser,
       emailSent: sendEmail,
@@ -456,6 +710,9 @@ export function TripProvider({ children }) {
         netBalances,
         simplifiedDebts,
         userSummary,
+        isCloudSyncing,
+        isCloudConfigured: isSupabaseConfigured(),
+        reloadCloudData,
         createTrip,
         joinTrip,
         addExpense,

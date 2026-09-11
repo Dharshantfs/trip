@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { TripProvider, useTrip } from './context/TripContext';
 import { ToastProvider } from './components/common/Toast';
 import { Header } from './components/navigation/Header';
@@ -20,12 +20,12 @@ import { TripSelector } from './components/trips/TripSelector';
 import { CreateTripModal } from './components/trips/CreateTripModal';
 import { JoinTripModal } from './components/trips/JoinTripModal';
 import { ProfileModal } from './components/profile/ProfileModal';
-import { useAuth } from './context/AuthContext';
 import { AuthModal } from './components/auth/AuthModal';
-import { Plus } from 'lucide-react';
+import { DatabaseModal } from './components/database/DatabaseModal';
+import { Plus, Database, Sparkles } from 'lucide-react';
 
 function TripSplitApp() {
-  const { activeTrip } = useTrip();
+  const { activeTrip, isCloudConfigured, reloadCloudData } = useTrip();
   const { currentUser, isAuthenticated } = useAuth();
 
   const [currentTab, setCurrentTab] = useState(activeTrip ? 'dashboard' : 'trips');
@@ -38,6 +38,8 @@ function TripSplitApp() {
   const [initialJoinCode, setInitialJoinCode] = useState('');
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isDatabaseOpen, setIsDatabaseOpen] = useState(false);
+  const [dismissCloudBanner, setDismissCloudBanner] = useState(false);
 
   // If no trip is selected or trips are empty, automatically stay on 'trips' view
   useEffect(() => {
@@ -118,10 +120,56 @@ function TripSplitApp() {
           onOpenProfile={() => setIsProfileOpen(true)}
           onOpenAuth={() => setIsAuthOpen(true)}
           onViewTrips={() => setCurrentTab('trips')}
+          onOpenDatabase={() => setIsDatabaseOpen(true)}
         />
 
         {/* Content Area */}
         <main className="content-area">
+          {/* Cloud Database Notice Banner if not yet connected */}
+          {!isCloudConfigured && !dismissCloudBanner && (
+            <div style={{
+              marginBottom: 20,
+              padding: '12px 18px',
+              borderRadius: 'var(--radius-lg)',
+              background: 'var(--color-warning-bg)',
+              border: '1px solid rgba(245, 158, 11, 0.35)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Database size={20} color="var(--color-warning)" style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-main)', lineHeight: 1.4 }}>
+                  <strong>Multi-Phone Real DB Sync:</strong> Connect your free Supabase database so your friends on other devices can join trips via invite codes instantly!
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  onClick={() => setIsDatabaseOpen(true)}
+                  className="btn btn-secondary btn-sm"
+                  style={{
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    padding: '6px 12px',
+                    borderColor: 'rgba(245, 158, 11, 0.6)',
+                  }}
+                >
+                  Connect Supabase
+                </button>
+                <button
+                  onClick={() => setDismissCloudBanner(true)}
+                  className="btn-ghost btn-sm"
+                  style={{ fontSize: '0.75rem', color: 'var(--text-dim)', padding: '6px' }}
+                  title="Dismiss banner"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+
           {currentTab === 'trips' && (
             <TripSelector
               onSelectTrip={() => setCurrentTab('dashboard')}
@@ -215,6 +263,7 @@ function TripSplitApp() {
         isOpen={isJoinTripOpen}
         onClose={() => setIsJoinTripOpen(false)}
         initialCode={initialJoinCode}
+        onOpenDatabaseModal={() => setIsDatabaseOpen(true)}
       />
 
       <InviteModal
@@ -230,6 +279,12 @@ function TripSplitApp() {
       <AuthModal
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
+      />
+
+      <DatabaseModal
+        isOpen={isDatabaseOpen}
+        onClose={() => setIsDatabaseOpen(false)}
+        onConnected={() => reloadCloudData()}
       />
     </div>
   );

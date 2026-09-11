@@ -18,7 +18,7 @@ export function CreateTripModal({ isOpen, onClose }) {
   const [currency, setCurrency] = useState('INR');
   const [error, setError] = useState('');
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
 
@@ -36,24 +36,28 @@ export function CreateTripModal({ isOpen, onClose }) {
       return;
     }
 
-    const newTrip = createTrip({
-      name: name.trim(),
-      destination: destination.trim(),
-      start_date: startDate,
-      end_date: endDate,
-      currency,
-    });
+    try {
+      const newTrip = await createTrip({
+        name: name.trim(),
+        destination: destination.trim(),
+        start_date: startDate,
+        end_date: endDate,
+        currency,
+      });
 
-    addToast({
-      type: 'success',
-      message: `Trip "${newTrip.name}" created! Invite code: ${newTrip.invite_code}`,
-    });
+      addToast({
+        type: 'success',
+        message: `Trip "${newTrip.name}" created! Invite code: ${newTrip.invite_code}`,
+      });
 
-    setName('');
-    setDestination('');
-    setStartDate('');
-    setEndDate('');
-    onClose();
+      setName('');
+      setDestination('');
+      setStartDate('');
+      setEndDate('');
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to create trip');
+    }
   };
 
   return (

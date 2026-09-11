@@ -13,17 +13,19 @@ export function AuthModal({ isOpen, onClose }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setError('');
+      setIsSubmitting(false);
       setMode(users.length === 0 ? 'signup' : 'login');
     }
   }, [isOpen, users.length]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
 
@@ -41,28 +43,44 @@ export function AuthModal({ isOpen, onClose }) {
         return;
       }
 
-      const res = signup({ name: name.trim(), email: email.trim(), password });
-      if (!res.success) {
-        setError(res.message);
-        return;
-      }
+      setIsSubmitting(true);
+      try {
+        const res = await signup({ name: name.trim(), email: email.trim(), password });
+        if (!res.success) {
+          setError(res.message);
+          setIsSubmitting(false);
+          return;
+        }
 
-      addToast({ type: 'success', message: `Welcome to TripSplit, ${name.trim()}!` });
-      onClose();
+        addToast({ type: 'success', message: `Welcome to TripSplit, ${name.trim()}!` });
+        onClose();
+      } catch (err) {
+        setError(err.message || 'Failed to sign up');
+      } finally {
+        setIsSubmitting(false);
+      }
     } else {
       if (!email.trim()) {
         setError('Please enter your email.');
         return;
       }
 
-      const res = login(email.trim(), password);
-      if (!res.success) {
-        setError(res.message);
-        return;
-      }
+      setIsSubmitting(true);
+      try {
+        const res = await login(email.trim(), password);
+        if (!res.success) {
+          setError(res.message);
+          setIsSubmitting(false);
+          return;
+        }
 
-      addToast({ type: 'success', message: `Welcome back, ${res.user.name}!` });
-      onClose();
+        addToast({ type: 'success', message: `Welcome back, ${res.user.name}!` });
+        onClose();
+      } catch (err) {
+        setError(err.message || 'Failed to sign in');
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -181,8 +199,13 @@ export function AuthModal({ isOpen, onClose }) {
             </div>
           </div>
 
-          <button type="submit" className="btn btn-primary" style={{ marginTop: 6, padding: '12px' }}>
-            {mode === 'login' ? 'Sign In' : 'Create My Account'}
+          <button 
+            type="submit" 
+            className="btn btn-primary" 
+            disabled={isSubmitting}
+            style={{ marginTop: 6, padding: '12px', opacity: isSubmitting ? 0.7 : 1 }}
+          >
+            {isSubmitting ? 'Authenticating...' : mode === 'login' ? 'Sign In' : 'Create My Account'}
           </button>
         </form>
 

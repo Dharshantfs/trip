@@ -13,12 +13,21 @@ import {
   Plus, 
   Share2,
   Calendar,
-  LogIn
+  LogIn,
+  Database
 } from 'lucide-react';
 
-export function Header({ onOpenCreateTrip, onOpenJoinTrip, onOpenInvite, onOpenProfile, onViewTrips, onOpenAuth }) {
+export function Header({ 
+  onOpenCreateTrip, 
+  onOpenJoinTrip, 
+  onOpenInvite, 
+  onOpenProfile, 
+  onViewTrips, 
+  onOpenAuth,
+  onOpenDatabase 
+}) {
   const { users, currentUser, switchUser, logout } = useAuth();
-  const { trips, activeTrip, setActiveTripId } = useTrip();
+  const { trips, activeTrip, setActiveTripId, isCloudConfigured, isCloudSyncing } = useTrip();
   const { theme, toggleTheme } = useTheme();
 
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -284,6 +293,41 @@ export function Header({ onOpenCreateTrip, onOpenJoinTrip, onOpenInvite, onOpenP
             Sign In / Register
           </button>
         )}
+
+        {/* Cloud DB Status / Config Button */}
+        <button
+          onClick={onOpenDatabase}
+          className="btn-ghost"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '5px 10px',
+            borderRadius: 'var(--radius-full)',
+            border: `1px solid ${isCloudConfigured ? 'rgba(16, 185, 129, 0.4)' : 'rgba(245, 158, 11, 0.4)'}`,
+            background: isCloudConfigured ? 'var(--color-success-bg)' : 'var(--color-warning-bg)',
+            color: isCloudConfigured ? 'var(--color-success)' : 'var(--color-warning)',
+            fontSize: '0.78rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+          title={isCloudConfigured ? 'Supabase Cloud DB Connected (Multi-device live sync active)' : 'Connect Supabase PostgreSQL to share with friends across devices'}
+        >
+          <Database size={14} />
+          <span>{isCloudConfigured ? 'Cloud DB' : 'Connect DB'}</span>
+          {isCloudConfigured && (
+            <div 
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: 'var(--color-success)',
+                boxShadow: '0 0 8px var(--color-success)',
+                animation: isCloudSyncing ? 'pulse 1s infinite' : 'none',
+              }} 
+            />
+          )}
+        </button>
 
         {/* Theme Toggle */}
         <button

@@ -78,7 +78,7 @@ The TripSplit Team`;
     }
   };
 
-  const handleSendEmailInvite = (e) => {
+  const handleSendEmailInvite = async (e) => {
     e.preventDefault();
     setEmailError('');
 
@@ -91,18 +91,22 @@ The TripSplit Team`;
       return;
     }
 
-    const res = inviteMemberDirect({ name, email, sendEmail: true });
-    if (!res.success) {
-      setEmailError(res.message);
-      return;
-    }
+    try {
+      const res = await inviteMemberDirect({ name, email, sendEmail: true });
+      if (!res.success) {
+        setEmailError(res.message);
+        return;
+      }
 
-    setSentRecipient({ name: name.trim(), email: email.trim() });
-    setIsSentSuccess(true);
-    addToast({
-      type: 'success',
-      message: `Invitation email sent to ${email.trim()}!`,
-    });
+      setSentRecipient({ name: name.trim(), email: email.trim() });
+      setIsSentSuccess(true);
+      addToast({
+        type: 'success',
+        message: `Invitation email recorded for ${email.trim()}!`,
+      });
+    } catch (err) {
+      setEmailError(err.message || 'Failed to send invite');
+    }
   };
 
   const handleOpenMailClient = () => {
