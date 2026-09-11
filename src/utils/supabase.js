@@ -6,8 +6,8 @@ const CONFIG_KEY = 'tripsplit_supabase_config';
  * Retrieve Supabase credentials from environment variables or local storage
  */
 export function getSupabaseCredentials() {
-  const envUrl = import.meta.env.VITE_SUPABASE_URL;
-  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const envUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.SUPABASE_URL;
+  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.SUPABASE_ANON_KEY;
 
   if (envUrl && envKey && envUrl.startsWith('http')) {
     return { url: envUrl.trim(), anonKey: envKey.trim(), source: 'env' };
