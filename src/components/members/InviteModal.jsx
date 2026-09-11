@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTrip } from '../../context/TripContext';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../common/Toast';
 import { Modal } from '../common/Modal';
+import { isSupabaseConfigured, dbCreateTrip } from '../../utils/supabase';
 import { 
   Copy, 
   Check, 
@@ -25,6 +26,13 @@ export function InviteModal({ isOpen, onClose }) {
   const [activeTab, setActiveTab] = useState('email'); // Default to email tab as requested
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+
+  // When invite modal is open, ensure active trip is securely pushed to Supabase
+  useEffect(() => {
+    if (isOpen && activeTrip && isSupabaseConfigured()) {
+      dbCreateTrip({ trip: activeTrip, creatorUser: currentUser }).catch(console.error);
+    }
+  }, [isOpen, activeTrip, currentUser]);
 
   // Invite by email form
   const [name, setName] = useState('');

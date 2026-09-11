@@ -55,6 +55,23 @@ export function TripProvider({ children }) {
       // 1. Fetch user trips from Supabase
       const cloudTrips = await dbFetchTripsForUser(currentUserId || 'anonymous');
       
+      // Auto-upload any local trips that haven't reached Supabase yet (e.g. trips created before connecting DB)
+      const localTrips = dbState.trips || [];
+      for (const localTrip of localTrips) {
+        const inCloud = cloudTrips.some(ct => ct.id === localTrip.id || ct.invite_code?.trim().toUpperCase() === localTrip.invite_code?.trim().toUpperCase());
+        if (!inCloud && localTrip.invite_code) {
+          try {
+            await dbCreateTrip({
+              trip: localTrip,
+              creatorUser: currentUser || { id: localTrip.created_by, name: 'Trip Admin' }
+            });
+            cloudTrips.push(localTrip);
+          } catch (e) {
+            console.error('Failed to auto-upload local trip:', e);
+          }
+        }
+      }
+
       const targetTripId = preferredTripId || activeTripId || cloudTrips[0]?.id || null;
       let cloudDetails = null;
 

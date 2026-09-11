@@ -189,11 +189,13 @@ export async function dbFindTripByInviteCode(code) {
     const { data, error } = await sb
       .from('trips')
       .select('*')
-      .ilike('invite_code', cleanCode)
-      .maybeSingle();
+      .ilike('invite_code', cleanCode);
 
     if (error) throw error;
-    return data;
+    if (data && data.length > 0) {
+      return data[0];
+    }
+    return null;
   } catch (err) {
     console.error('dbFindTripByInviteCode error:', err);
     return null;
@@ -204,36 +206,56 @@ export async function dbCreateTrip({ trip, creatorUser }) {
   const sb = getSupabase();
   if (!sb) return trip;
   try {
+    const creatorId = trip.created_by || creatorUser?.id || `usr_${Date.now()}`;
+    
     // Ensure creator user exists in users table first
-    if (creatorUser) {
-      await dbUpsertUser(creatorUser);
+    const userToUpsert = {
+      id: creatorId,
+      name: creatorUser?.name || 'Trip Admin',
+      email: creatorUser?.email || `${creatorId}@tripsplit.app`,
+      created_at: new Date().toISOString(),
+    };
+    await dbUpsertUser(userToUpsert);
+
+    // Upsert trip
+    const tripPayload = {
+      id: trip.id,
+      name: trip.name,
+      destination: trip.destination,
+      start_date: trip.start_date || null,
+      end_date: trip.end_date || null,
+      currency: trip.currency || 'INR',
+      invite_code: trip.invite_code.trim().toUpperCase(),
+      created_by: creatorId,
+      created_at: trip.created_at || new Date().toISOString(),
+    };
+
+    const { error: tripErr } = await sb.from('trips').upsert(tripPayload, { onConflict: 'id' });
+    if (tripErr) {
+      console.error('dbCreateTrip trip insert error:', tripErr);
+      throw tripErr;
     }
 
-    // Insert trip
-    const { error: tripErr } = await sb.from('trips').insert(trip);
-    if (tripErr) throw tripErr;
-
-    // Insert admin membership
+    // Upsert admin membership
     const memberRow = {
-      id: `tm_${trip.id}_${trip.created_by}`,
+      id: `tm_${trip.id}_${creatorId}`,
       trip_id: trip.id,
-      user_id: trip.created_by,
+      user_id: creatorId,
       role: 'admin',
       joined_at: new Date().toISOString(),
     };
-    const { error: memErr } = await sb.from('trip_members').insert(memberRow);
-    if (memErr) throw memErr;
+    await sb.from('trip_members').upsert(memberRow, { onConflict: 'id' });
 
-    // Insert activity
+    // Upsert activity
     const actRow = {
       id: `act_${Date.now()}`,
       trip_id: trip.id,
-      user_id: trip.created_by,
+      user_id: creatorId,
       type: 'trip_created',
       metadata: { trip_name: trip.name },
       created_at: new Date().toISOString(),
     };
-    await sb.from('activity').insert(actRow);
+    await sb.from('activity').upsert(actRow, { onConflict: 'id' });
 
     return trip;
   } catch (err) {
