@@ -28,8 +28,8 @@ function TripSplitApp() {
   const { activeTrip } = useTrip();
   const { currentUser, isAuthenticated } = useAuth();
 
-  const [currentTab, setCurrentTab] = useState('dashboard');
-  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [currentTab, setCurrentTab] = useState(activeTrip ? 'dashboard' : 'trips');
+  const [isAuthOpen, setIsAuthOpen] = useState(!currentUser);
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const [detailExpense, setDetailExpense] = useState(null);
@@ -39,6 +39,13 @@ function TripSplitApp() {
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
+  // If no trip is selected or trips are empty, automatically stay on 'trips' view
+  useEffect(() => {
+    if (!activeTrip && currentTab !== 'trips') {
+      setCurrentTab('trips');
+    }
+  }, [activeTrip, currentTab]);
+
   // Check URL query parameters on load for direct invite link (e.g. ?join=GOA6X9 or ?invite=GOA6X9)
   useEffect(() => {
     try {
@@ -46,14 +53,39 @@ function TripSplitApp() {
       const joinCode = params.get('join') || params.get('invite');
       if (joinCode) {
         setInitialJoinCode(joinCode.toUpperCase());
-        setIsJoinTripOpen(true);
+        if (!currentUser) {
+          setIsAuthOpen(true);
+        } else {
+          setIsJoinTripOpen(true);
+        }
       }
     } catch {}
-  }, []);
+  }, [currentUser]);
 
   const handleOpenAddExpense = () => {
+    if (!currentUser) {
+      setIsAuthOpen(true);
+      return;
+    }
     setEditingExpense(null);
     setIsAddExpenseOpen(true);
+  };
+
+  const handleOpenCreateTrip = () => {
+    if (!currentUser) {
+      setIsAuthOpen(true);
+      return;
+    }
+    setIsCreateTripOpen(true);
+  };
+
+  const handleOpenJoinTrip = (code = '') => {
+    if (!currentUser) {
+      setIsAuthOpen(true);
+      return;
+    }
+    setInitialJoinCode(code);
+    setIsJoinTripOpen(true);
   };
 
   const handleEditExpense = (expense) => {
@@ -80,11 +112,8 @@ function TripSplitApp() {
       <div className="main-wrapper">
         {/* Sticky Header */}
         <Header
-          onOpenCreateTrip={() => setIsCreateTripOpen(true)}
-          onOpenJoinTrip={() => {
-            setInitialJoinCode('');
-            setIsJoinTripOpen(true);
-          }}
+          onOpenCreateTrip={handleOpenCreateTrip}
+          onOpenJoinTrip={() => handleOpenJoinTrip('')}
           onOpenInvite={() => setIsInviteOpen(true)}
           onOpenProfile={() => setIsProfileOpen(true)}
           onOpenAuth={() => setIsAuthOpen(true)}
@@ -96,11 +125,8 @@ function TripSplitApp() {
           {currentTab === 'trips' && (
             <TripSelector
               onSelectTrip={() => setCurrentTab('dashboard')}
-              onOpenCreateTrip={() => setIsCreateTripOpen(true)}
-              onOpenJoinTrip={() => {
-                setInitialJoinCode('');
-                setIsJoinTripOpen(true);
-              }}
+              onOpenCreateTrip={handleOpenCreateTrip}
+              onOpenJoinTrip={() => handleOpenJoinTrip('')}
             />
           )}
 

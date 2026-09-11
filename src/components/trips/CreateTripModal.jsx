@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useTrip } from '../../context/TripContext';
+import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../common/Toast';
 import { Modal } from '../common/Modal';
 import { CURRENCIES } from '../../utils/currency';
@@ -7,6 +8,7 @@ import { Compass, MapPin, Calendar, DollarSign, AlertCircle } from 'lucide-react
 
 export function CreateTripModal({ isOpen, onClose }) {
   const { createTrip } = useTrip();
+  const { currentUser } = useAuth();
   const { addToast } = useToast();
 
   const [name, setName] = useState('');
@@ -19,6 +21,11 @@ export function CreateTripModal({ isOpen, onClose }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     setError('');
+
+    if (!currentUser) {
+      setError('Please sign in or create an account before creating a trip.');
+      return;
+    }
 
     if (!name.trim()) {
       setError('Please enter a trip name.');

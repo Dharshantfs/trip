@@ -1,6 +1,15 @@
 import { createInitialDemoState } from './demoData.js';
 
-const STORAGE_KEY = 'tripsplit_db_v1';
+const STORAGE_KEY = 'tripsplit_real_v3';
+
+// Clear out legacy demo storage keys so browsers on Vercel immediately start fresh
+try {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    if (localStorage.getItem('tripsplit_db_v1')) {
+      localStorage.removeItem('tripsplit_db_v1');
+    }
+  }
+} catch {}
 
 let broadcastChannel = null;
 try {
@@ -12,32 +21,38 @@ try {
 }
 
 /**
- * Load entire database state from localStorage or seed initial demo state
+ * Clean production initial state
+ */
+export function createRealInitialState() {
+  return createInitialDemoState();
+}
+
+/**
+ * Load database state from localStorage or start fresh
  */
 export function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      const initial = createInitialDemoState();
+      const initial = createRealInitialState();
       saveState(initial, false);
       return initial;
     }
     const parsed = JSON.parse(raw);
-    // Ensure all critical root keys exist
     if (!parsed.trips || !parsed.users) {
-      const initial = createInitialDemoState();
+      const initial = createRealInitialState();
       saveState(initial, false);
       return initial;
     }
     return parsed;
   } catch (err) {
     console.error('Error loading state from localStorage:', err);
-    return createInitialDemoState();
+    return createRealInitialState();
   }
 }
 
 /**
- * Save entire database state to localStorage & broadcast event
+ * Save state to localStorage & broadcast
  */
 export function saveState(state, broadcast = true) {
   try {
@@ -51,16 +66,16 @@ export function saveState(state, broadcast = true) {
 }
 
 /**
- * Reset database to fresh demo state
+ * Clear all data and reset to fresh empty state
  */
 export function resetToDemoState() {
-  const fresh = createInitialDemoState();
+  const fresh = createRealInitialState();
   saveState(fresh, true);
   return fresh;
 }
 
 /**
- * Subscribe to cross-tab updates
+ * Cross-tab synchronization
  */
 export function subscribeToSync(callback) {
   const onBroadcast = (e) => {

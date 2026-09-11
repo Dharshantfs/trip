@@ -12,11 +12,12 @@ import {
   MapPin, 
   Plus, 
   Share2,
-  Calendar
+  Calendar,
+  LogIn
 } from 'lucide-react';
 
 export function Header({ onOpenCreateTrip, onOpenJoinTrip, onOpenInvite, onOpenProfile, onViewTrips, onOpenAuth }) {
-  const { users, currentUser, switchUser } = useAuth();
+  const { users, currentUser, switchUser, logout } = useAuth();
   const { trips, activeTrip, setActiveTripId } = useTrip();
   const { theme, toggleTheme } = useTheme();
 
@@ -187,102 +188,102 @@ export function Header({ onOpenCreateTrip, onOpenJoinTrip, onOpenInvite, onOpenP
 
       {/* Right: Quick User Switcher + Theme Toggle + Profile */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        {/* User Switcher Dropdown (Crucial for multi-member testing) */}
-        <div style={{ position: 'relative' }} ref={userMenuRef}>
-          <button
-            onClick={() => setUserMenuOpen(!userMenuOpen)}
-            className="btn-secondary"
-            style={{
-              padding: '4px 10px 4px 6px',
-              borderRadius: 'var(--radius-full)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-            }}
-            title="Switch demo user"
-          >
-            <Avatar user={currentUser} size={28} />
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', textAlign: 'left' }}>
-              <span style={{ fontSize: '0.813rem', fontWeight: 600, lineHeight: 1.2 }}>
-                {currentUser?.name || 'You'}
+        {/* Real User Account or Sign In Button */}
+        {currentUser ? (
+          <div style={{ position: 'relative' }} ref={userMenuRef}>
+            <button
+              onClick={() => setUserMenuOpen(!userMenuOpen)}
+              className="btn-secondary"
+              style={{
+                padding: '4px 10px 4px 6px',
+                borderRadius: 'var(--radius-full)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+              title="Account Menu"
+            >
+              <Avatar user={currentUser} size={28} />
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+                {currentUser.name}
               </span>
-              <span style={{ fontSize: '0.65rem', color: 'var(--color-primary)', fontWeight: 600, lineHeight: 1 }}>
-                Switch User
-              </span>
-            </div>
-            <ChevronDown size={14} color="var(--text-muted)" />
-          </button>
+              <ChevronDown size={14} color="var(--text-muted)" />
+            </button>
 
-          {userMenuOpen && (
-            <div style={{
-              position: 'absolute',
-              top: 'calc(100% + 8px)',
-              right: 0,
-              width: 250,
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border-medium)',
-              borderRadius: 'var(--radius-lg)',
-              padding: 8,
-              boxShadow: 'var(--shadow-lg)',
-              zIndex: 200,
-            }}>
-              <div style={{ padding: '6px 10px', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                Simulate As Member:
-              </div>
-              {users.map(u => (
-                <div
-                  key={u.id}
+            {userMenuOpen && (
+              <div style={{
+                position: 'absolute',
+                top: 'calc(100% + 8px)',
+                right: 0,
+                width: 240,
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: 'var(--radius-lg)',
+                padding: 10,
+                boxShadow: 'var(--shadow-lg)',
+                zIndex: 200,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}>
+                <div style={{ padding: '6px 8px' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{currentUser.name}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{currentUser.email}</div>
+                </div>
+
+                <div style={{ height: 1, background: 'var(--border-subtle)', margin: '4px 0' }} />
+
+                <button
                   onClick={() => {
-                    switchUser(u.id);
                     setUserMenuOpen(false);
+                    onOpenProfile();
                   }}
+                  className="btn-ghost"
                   style={{
-                    padding: '8px 10px',
+                    width: '100%',
+                    justifyContent: 'flex-start',
+                    gap: 8,
+                    fontSize: '0.85rem',
+                    padding: '8px',
                     borderRadius: 'var(--radius-md)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    background: u.id === currentUser?.id ? 'var(--color-primary-light)' : 'transparent',
-                    color: u.id === currentUser?.id ? 'var(--color-primary)' : 'var(--text-main)',
-                    fontWeight: u.id === currentUser?.id ? 600 : 400,
-                    fontSize: '0.875rem',
                   }}
                 >
-                  <Avatar user={u} size={28} />
-                  <div style={{ flex: 1 }}>
-                    <div>{u.name}</div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{u.email}</div>
-                  </div>
-                  {u.id === currentUser?.id && <UserCheck size={16} color="var(--color-primary)" />}
-                </div>
-              ))}
+                  <UserCheck size={16} color="var(--color-primary)" />
+                  Account Settings
+                </button>
 
-              <div style={{ height: 1, background: 'var(--border-subtle)', margin: '6px 0' }} />
-
-              <button
-                onClick={() => {
-                  setUserMenuOpen(false);
-                  onOpenAuth();
-                }}
-                style={{
-                  width: '100%',
-                  padding: '8px 10px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: '0.85rem',
-                  color: 'var(--color-primary)',
-                  fontWeight: 600,
-                  borderRadius: 'var(--radius-sm)',
-                }}
-              >
-                <UserCheck size={15} />
-                Sign In / Real Account
-              </button>
-            </div>
-          )}
-        </div>
+                <button
+                  onClick={() => {
+                    setUserMenuOpen(false);
+                    logout();
+                  }}
+                  className="btn-ghost"
+                  style={{
+                    width: '100%',
+                    justifyContent: 'flex-start',
+                    gap: 8,
+                    fontSize: '0.85rem',
+                    padding: '8px',
+                    borderRadius: 'var(--radius-md)',
+                    color: 'var(--color-danger)',
+                  }}
+                >
+                  <LogIn size={16} />
+                  Log Out
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <button
+            onClick={onOpenAuth}
+            className="btn btn-primary btn-sm"
+            style={{ borderRadius: 'var(--radius-full)', padding: '6px 14px' }}
+          >
+            <LogIn size={15} />
+            Sign In / Register
+          </button>
+        )}
 
         {/* Theme Toggle */}
         <button

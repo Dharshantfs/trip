@@ -38,7 +38,11 @@ export function TripSelector({ onSelectTrip, onOpenCreateTrip, onOpenJoinTrip })
             Your Trips
           </h1>
           <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-            Welcome back, <strong>{currentUser?.name}</strong>! Select a trip to manage expenses.
+            {currentUser ? (
+              <>Welcome back, <strong>{currentUser.name}</strong>! Select a trip to manage expenses.</>
+            ) : (
+              <>Welcome to TripSplit! Sign in or create an account to start managing your trips.</>
+            )}
           </p>
         </div>
 

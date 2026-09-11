@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { useTrip } from '../../context/TripContext';
+import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../common/Toast';
 import { Modal } from '../common/Modal';
 import { KeyRound, AlertCircle, ArrowRight, MapPin, Users } from 'lucide-react';
 
 export function JoinTripModal({ isOpen, onClose, initialCode = '' }) {
   const { trips, joinTrip } = useTrip();
+  const { currentUser } = useAuth();
   const { addToast } = useToast();
 
   const [code, setCode] = useState(initialCode);
@@ -17,6 +19,11 @@ export function JoinTripModal({ isOpen, onClose, initialCode = '' }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     setError('');
+
+    if (!currentUser) {
+      setError('Please sign in or create an account first to join this trip.');
+      return;
+    }
 
     if (!trimmedCode) {
       setError('Please enter an invite code.');

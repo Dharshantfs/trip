@@ -1,19 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../common/Toast';
 import { Modal } from '../common/Modal';
-import { Avatar } from '../common/Avatar';
-import { LogIn, UserPlus, AlertCircle, Check, Key, Mail, User, Sparkles } from 'lucide-react';
+import { LogIn, UserPlus, AlertCircle, Key, Mail, User, ShieldCheck } from 'lucide-react';
 
 export function AuthModal({ isOpen, onClose }) {
-  const { login, signup, users, switchUser } = useAuth();
+  const { login, signup, users } = useAuth();
   const { addToast } = useToast();
 
-  const [mode, setMode] = useState('login'); // 'login' | 'signup'
+  const [mode, setMode] = useState(users.length === 0 ? 'signup' : 'login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (isOpen) {
+      setError('');
+      setMode(users.length === 0 ? 'signup' : 'login');
+    }
+  }, [isOpen, users.length]);
 
   if (!isOpen) return null;
 
@@ -55,16 +61,9 @@ export function AuthModal({ isOpen, onClose }) {
         return;
       }
 
-      addToast({ type: 'success', message: `Logged in as ${res.user.name}!` });
+      addToast({ type: 'success', message: `Welcome back, ${res.user.name}!` });
       onClose();
     }
-  };
-
-  const handleQuickDemoUser = (userId) => {
-    switchUser(userId);
-    const u = users.find(user => user.id === userId);
-    addToast({ type: 'info', message: `Switched to demo account: ${u?.name || 'User'}` });
-    onClose();
   };
 
   return (
@@ -144,6 +143,7 @@ export function AuthModal({ isOpen, onClose }) {
                   onChange={(e) => setName(e.target.value)}
                   className="form-input"
                   style={{ paddingLeft: 38 }}
+                  autoFocus
                 />
               </div>
             </div>
@@ -186,45 +186,19 @@ export function AuthModal({ isOpen, onClose }) {
           </button>
         </form>
 
-        {/* Quick Demo Pick Option */}
         <div style={{
-          borderTop: '1px solid var(--border-subtle)',
-          paddingTop: 14,
           display: 'flex',
-          flexDirection: 'column',
-          gap: 10,
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 6,
+          fontSize: '0.75rem',
+          color: 'var(--text-dim)',
+          textAlign: 'center',
+          borderTop: '1px solid var(--border-subtle)',
+          paddingTop: 12,
         }}>
-          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase' }}>
-            Or Fast Log In As Demo Traveler:
-          </div>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: 8,
-          }}>
-            {users.slice(0, 6).map(u => (
-              <button
-                key={u.id}
-                type="button"
-                onClick={() => handleQuickDemoUser(u.id)}
-                className="btn-secondary"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '6px 8px',
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: '0.78rem',
-                  justifyContent: 'flex-start',
-                }}
-              >
-                <Avatar user={u} size={20} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {u.name.split(' ')[0]}
-                </span>
-              </button>
-            ))}
-          </div>
+          <ShieldCheck size={14} color="var(--color-primary)" />
+          <span>Real-time private data stored securely in your browser</span>
         </div>
       </div>
     </Modal>

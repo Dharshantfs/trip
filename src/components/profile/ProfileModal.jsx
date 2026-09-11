@@ -138,68 +138,19 @@ export function ProfileModal({ isOpen, onClose }) {
             </button>
           </div>
 
-          {/* Reset Demo Data Button */}
+          {/* Clear Storage Option */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <RotateCcw size={18} color="var(--color-primary)" />
+              <RotateCcw size={18} color="var(--text-dim)" />
               <div>
-                <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>Reset Demo Data</div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>Reloads 6-member Goa Trip 2026 data</div>
+                <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>Clear Stored Data</div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>Resets local data in this browser</div>
               </div>
             </div>
             <button onClick={handleResetDemo} className="btn btn-secondary btn-sm">
-              Reset Data
+              Clear Data
             </button>
           </div>
-        </div>
-
-        {/* Create New Account Option */}
-        <div style={{
-          borderTop: '1px solid var(--border-subtle)',
-          paddingTop: 16,
-        }}>
-          {!isAddingUser ? (
-            <button
-              onClick={() => setIsAddingUser(true)}
-              className="btn btn-ghost btn-sm"
-              style={{ color: 'var(--color-primary)', fontWeight: 600 }}
-            >
-              <UserPlus size={16} />
-              + Create another user account
-            </button>
-          ) : (
-            <form onSubmit={handleCreateAccount} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>Create New Member Account</div>
-              <input
-                type="text"
-                placeholder="Full Name (e.g. Maya)"
-                required
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                className="form-input"
-              />
-              <input
-                type="email"
-                placeholder="Email Address"
-                required
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-                className="form-input"
-              />
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button type="submit" className="btn btn-primary btn-sm">
-                  Create & Switch
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsAddingUser(false)}
-                  className="btn btn-secondary btn-sm"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          )}
         </div>
 
         {/* Logout Session */}
